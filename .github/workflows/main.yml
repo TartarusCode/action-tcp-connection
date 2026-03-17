@@ -1,22 +1,147 @@
 name: Github Action - TCP Test
-on: [push]
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+    branches: [main, master]
+
+permissions: {}
 
 jobs:
   tcp_connection_test:
     runs-on: ubuntu-latest
-    name: A job to test connectivity
+    name: Test TCP connectivity
     steps:
       - name: Checkout
-        uses: actions/checkout@v2
-      - name: Test Working Connectivity
-        uses: ./ # Uses an action in the root directory
-        id: conn
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      # --- Basic connectivity ---
+
+      - name: Single target (pass)
+        uses: ./
+        id: single
         with:
           remotehost: '1.1.1.1'
           remoteport: '80'
-      - name: Test Failing Connectivity
+          maxtime: '30'
+
+      - name: Verify single-target outputs
+        env:
+          RESULT: ${{ steps.single.outputs.result }}
+          LATENCY: ${{ steps.single.outputs.latency_ms }}
+          DETAILS: ${{ steps.single.outputs.details }}
+        run: |
+          echo "Result:  $RESULT"
+          echo "Latency: ${LATENCY}ms"
+          echo "Details: $DETAILS"
+
+      - name: Multi-target (pass)
+        uses: ./
+        id: multi
+        with:
+          targets: |
+            1.1.1.1:80
+            8.8.8.8:53
+          maxtime: '30'
+
+      - name: Verify multi-target outputs
+        env:
+          RESULT: ${{ steps.multi.outputs.result }}
+          LATENCY: ${{ steps.multi.outputs.latency_ms }}
+          DETAILS: ${{ steps.multi.outputs.details }}
+        run: |
+          echo "Result:  $RESULT"
+          echo "Latency: ${LATENCY}ms"
+          echo "Details: $DETAILS"
+
+      # --- Global send/expect ---
+
+      - name: HTTP send/expect (pass)
+        uses: ./
+        id: http_check
+        with:
+          remotehost: '1.1.1.1'
+          remoteport: '80'
+          send: 'GET / HTTP/1.0\r\nHost: 1.1.1.1\r\n\r\n'
+          expect: 'HTTP/1\.[01] [23]\d\d'
+          maxtime: '15'
+
+      - name: Verify HTTP send/expect outputs
+        env:
+          RESULT: ${{ steps.http_check.outputs.result }}
+          DETAILS: ${{ steps.http_check.outputs.details }}
+        run: |
+          echo "Result:  $RESULT"
+          echo "Details: $DETAILS"
+
+      - name: Expect mismatch (expected failure)
+        uses: ./
+        id: bad_expect
+        continue-on-error: true
+        with:
+          remotehost: '1.1.1.1'
+          remoteport: '80'
+          send: 'GET / HTTP/1.0\r\nHost: 1.1.1.1\r\n\r\n'
+          expect: 'WILL_NEVER_MATCH_THIS_STRING'
+          maxtime: '10'
+
+      - name: Verify expect mismatch was detected
+        if: steps.bad_expect.outcome == 'success'
+        run: |
+          echo "::error::Expected expect-mismatch failure but step succeeded"
+          exit 1
+
+      # --- Per-target send/expect overrides ---
+
+      - name: Multi-target with per-target send/expect
+        uses: ./
+        id: pertarget
+        with:
+          targets: |
+            1.1.1.1:80 | send=GET / HTTP/1.0\r\nHost: 1.1.1.1\r\n\r\n | expect=HTTP/1\.[01] [23]\d\d
+            8.8.8.8:53
+          maxtime: '15'
+
+      - name: Verify per-target outputs
+        env:
+          RESULT: ${{ steps.pertarget.outputs.result }}
+          DETAILS: ${{ steps.pertarget.outputs.details }}
+        run: |
+          echo "Result:  $RESULT"
+          echo "Details: $DETAILS"
+
+      # --- Failure scenarios ---
+
+      - name: Single target (expected failure)
         uses: ./
         id: bad_conn
+        continue-on-error: true
         with:
           remotehost: '1.1.1.1'
           remoteport: '8675'
+          maxtime: '5'
+          max_retries: '2'
+
+      - name: Verify failure was detected
+        if: steps.bad_conn.outcome == 'success'
+        run: |
+          echo "::error::Expected connection to fail but it succeeded"
+          exit 1
+
+      - name: Multi-target with one bad host (expected failure)
+        uses: ./
+        id: partial
+        continue-on-error: true
+        with:
+          targets: |
+            1.1.1.1:80
+            1.1.1.1:8675
+          maxtime: '5'
+          max_retries: '2'
+
+      - name: Verify partial failure was detected
+        if: steps.partial.outcome == 'success'
+        run: |
+          echo "::error::Expected partial failure but all targets succeeded"
+          exit 1

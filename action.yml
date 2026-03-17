@@ -1,24 +1,57 @@
-# action.yml
 name: 'Make TCP Connection'
-description: 'Test TCP Connectivity with retry logic'
+description: 'Test TCP connectivity to one or more host:port targets with optional send/expect verification'
+
 inputs:
-  remotehost:  # id of input
-    description: 'IP address or hostname to connect to'
-    required: true
-    default: '127.0.0.1'
+  remotehost:
+    description: 'Hostname or IP to connect to (ignored when targets is set)'
+    required: false
   remoteport:
-    description: 'Port number to connect to (1-65535)'
-    required: true
-    default: '80'
+    description: 'Port to connect to, 1-65535 (ignored when targets is set)'
+    required: false
+  targets:
+    description: >-
+      Multiline list of host:port targets (takes precedence over remotehost/remoteport).
+      Per-target send/expect overrides: host:port | send=payload | expect=pattern
+    required: false
+  send:
+    description: 'Default payload to send after connecting (supports \r\n escapes). Overridden per-target with | send=...'
+    required: false
+  expect:
+    description: 'Default regex the response must match. Overridden per-target with | expect=...'
+    required: false
+  expect_timeout:
+    description: 'Seconds to wait for response data when using send/expect'
+    required: false
+    default: '5'
   maxtime:
-    description: 'Maximum time in seconds to retry connection'
+    description: 'Maximum total retry time in seconds'
     required: false
     default: '60'
+  connect_timeout:
+    description: 'Per-attempt socket timeout in seconds'
+    required: false
+    default: '10'
+  max_retries:
+    description: 'Maximum retry attempts (0 = unlimited, bounded by maxtime)'
+    required: false
+    default: '0'
+  retry_delay:
+    description: 'Initial backoff delay in seconds'
+    required: false
+    default: '1'
+
 outputs:
-  myOutput:
-    description: 'Success message when connection is established'
-  error:
-    description: 'Error message if connection fails'
+  result:
+    description: 'Summary result message'
+  latency_ms:
+    description: 'Total connection time in milliseconds (sum across all targets)'
+  details:
+    description: 'JSON array with per-target results: [{host, port, status, latency_ms, response, error}]'
+
+branding:
+  icon: 'wifi'
+  color: 'blue'
+
 runs:
   using: 'docker'
   image: 'Dockerfile'
